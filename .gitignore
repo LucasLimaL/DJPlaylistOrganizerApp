@@ -1,0 +1,11 @@
+# Configurações e credenciais — NÃO versionar
+config.json
+.spotify_token.json
+.spotify_match_cache.json
+.beatport_cache.json
+playlist_snapshot.json
+_debug_item.json
+
+# Python
+__pycache__/
+*.pyc

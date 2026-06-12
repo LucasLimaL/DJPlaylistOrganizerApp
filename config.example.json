@@ -1,0 +1,10 @@
+{
+  "client_id": "",
+  "client_secret": "",
+  "source_dir": "",
+  "final_dir": "",
+  "playlist_name": "Download Sync",
+  "op_mode": "move",
+  "dedupe_apply": false,
+  "sync_limit": "0"
+}
