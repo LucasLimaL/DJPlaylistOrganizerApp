@@ -43,7 +43,7 @@ def save_json(p, o):
     json.dump(o, open(p,"w",encoding="utf-8"), ensure_ascii=False, indent=2)
 
 DEFAULTS = {"client_id":"","client_secret":"","source_dir":"","final_dir":"",
-            "playlist_name":"Download Sync","op_mode":"move","dedupe_apply":False,"sync_limit":"0","source_playlist_url":"","dest_playlist_url":""}
+            "playlist_name":"Download Sync","op_mode":"move","dedupe_apply":False,"sync_limit":"0","source_playlist_url":"","dest_playlist_url":"","fix_scope":"downloaded"}
 def get_config():
     c = load_json(CONFIG_FILE, {})
     for k,v in DEFAULTS.items(): c.setdefault(k,v)
@@ -299,9 +299,14 @@ def dedupe(final, apply):
     files=[os.path.join(r,f) for r,_,fs in os.walk(base) for f in fs if f.lower().endswith(".mp3")]
     if not files: log("Nenhum mp3 em Genres."); return
     log(f"Analisando {len(files)} arquivo(s)...  (modo: {'REMOVER de fato' if apply else 'apenas prévia'})\n")
-    STOP={"the","a","an","feat","ft","and","de","do","da"}
+    STOP={"the","an","and","of","feat","ft","with",
+          "a","o","e","de","da","do","das","dos","no","na","nos","nas","em","com","que","pra","para",
+          "ao","vivo","live","remix","mix","extended","original","edit","version","remaster","rework",
+          "vip","radio","club","oficial","official","audio","video","lyric","lyrics","vs","x",
+          "spotdown","org","www","spotifydown","ytmp3","mp3","kbps","320","128"}
     def toks(p):
-        sn=re.sub(r"[^a-z0-9 ]"," ",os.path.splitext(os.path.basename(p))[0].lower())
+        sn=_clean_junk(os.path.splitext(os.path.basename(p))[0]).lower()
+        sn=re.sub(r"[^a-z0-9 ]"," ",sn)
         return frozenset(w for w in sn.split() if w not in STOP and len(w)>1)
     def dur(p):
         if HAVE_MUTAGEN:
@@ -364,7 +369,7 @@ def dedupe(final, apply):
             a,b=rest[i],rest[j]; ta,tb=tok[a],tok[b]
             if not ta or not tb: continue
             inter=ta&tb; jac=len(inter)/len(ta|tb)
-            if ((ta<=tb or tb<=ta) and min(len(ta),len(tb))>=2) or jac>=0.6:
+            if ((ta<=tb or tb<=ta) and min(len(ta),len(tb))>=2) or jac>=0.7:
                 review.append((a,b,round(jac,2)))
     if review:
         log("Possíveis duplicatas para revisar à mão (NÃO removidas — podem ser versões diferentes):")
@@ -465,16 +470,23 @@ def _clean_junk(s):
     s=re.sub(r"\s+"," ",s).strip(" -_.")
     return s
 
-def fix_names(final):
+def fix_names(final, scope="downloaded"):
     if not final or not os.path.isdir(final): log(f"Pasta inválida: {final}"); return
-    folder=os.path.join(final,"Downloaded Musics"); os.makedirs(folder,exist_ok=True)
-    files=[f for f in os.listdir(folder) if f.lower().endswith(".mp3") and os.path.isfile(os.path.join(folder,f))]
+    if scope=="genres":
+        root=os.path.join(final,"Genres")
+        if not os.path.isdir(root): log("Pasta 'Genres' não existe."); return
+        files=[os.path.join(r,f) for r,_,fs in os.walk(root) for f in fs if f.lower().endswith(".mp3")]
+        alvo="Genres (toda a coleção)"
+    else:
+        root=os.path.join(final,"Downloaded Musics"); os.makedirs(root,exist_ok=True)
+        files=[os.path.join(root,f) for f in os.listdir(root) if f.lower().endswith(".mp3") and os.path.isfile(os.path.join(root,f))]
+        alvo="Downloaded Musics"
     if not files:
-        log(f"Pasta pronta: {folder}\nColoque os mp3s a corrigir nela e rode de novo."); return
-    log(f"Corrigindo {len(files)} arquivo(s) em 'Downloaded Musics'...\n")
+        log(f"Nenhum mp3 em {alvo}." + ("" if scope=="genres" else f"\nColoque os mp3s em: {root}")); return
+    log(f"Corrigindo {len(files)} arquivo(s) em {alvo}...\n")
     done=0
-    for i,f in enumerate(sorted(files),1):
-        src=os.path.join(folder,f)
+    for i,src in enumerate(sorted(files),1):
+        d=os.path.dirname(src); f=os.path.basename(src)
         artist=title=""
         if HAVE_MUTAGEN:
             try:
@@ -499,15 +511,16 @@ def fix_names(final):
                 if artist: tt["artist"]=artist
                 tt.save()
             except Exception: pass
-        dest=os.path.join(folder,newbase)
+        dest=os.path.join(d,newbase)
         if os.path.abspath(dest)!=os.path.abspath(src):
             st0,ext=os.path.splitext(newbase); n=1
-            while os.path.exists(dest): n+=1; dest=os.path.join(folder,f"{st0} ({n}){ext}")
+            while os.path.exists(dest): n+=1; dest=os.path.join(d,f"{st0} ({n}){ext}")
             try: os.replace(src,dest)
             except Exception as e: log(f"[{i}/{len(files)}] ERRO em {f}: {e}"); continue
         done+=1
-        log(f"[{i}/{len(files)}] {f}  ->  {os.path.basename(dest)}")
-    log(f"\nConcluído. Corrigidos: {done}. Pasta: {folder}")
+        rel=os.path.relpath(dest, root) if scope=="genres" else os.path.basename(dest)
+        log(f"[{i}/{len(files)}] {f}  ->  {rel}")
+    log(f"\nConcluído. Corrigidos: {done}. Alvo: {alvo}")
 
 def run_job(fn,*a):
     def wrap():
@@ -557,7 +570,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path=="/api/organize": run_job(organize,c["source_dir"],c["final_dir"],c["op_mode"])
             elif u.path=="/api/dedupe": run_job(dedupe,c["final_dir"],bool(c["dedupe_apply"]))
             elif u.path=="/api/diff": run_job(diff_download,c["client_id"],c["client_secret"],c["source_playlist_url"],c["dest_playlist_url"],c["playlist_name"])
-            elif u.path=="/api/fixnames": run_job(fix_names,c["final_dir"])
+            elif u.path=="/api/fixnames": run_job(fix_names,c["final_dir"],c["fix_scope"])
             else: run_job(sync,c["client_id"],c["client_secret"],c["final_dir"],c["playlist_name"],c["sync_limit"])
             return self._send(200,"application/json",json.dumps({"ok":True}))
         return self._send(404,"text/plain","not found")
