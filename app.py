@@ -43,11 +43,18 @@ def save_json(p, o):
     json.dump(o, open(p,"w",encoding="utf-8"), ensure_ascii=False, indent=2)
 
 DEFAULTS = {"client_id":"","client_secret":"","source_dir":"","final_dir":"",
-            "playlist_name":"Download Sync","op_mode":"move","dedupe_apply":False,"sync_limit":"0"}
+            "playlist_name":"Download Sync","op_mode":"move","dedupe_apply":False,"sync_limit":"0","source_playlist_url":"","dest_playlist_url":""}
 def get_config():
     c = load_json(CONFIG_FILE, {})
     for k,v in DEFAULTS.items(): c.setdefault(k,v)
     return c
+
+def ensure_library(final):
+    """Cria as pastas-base da Biblioteca organizada: Genres/ e Downloaded Musics/."""
+    if final and os.path.isdir(final):
+        for sub in ("Genres","Downloaded Musics"):
+            try: os.makedirs(os.path.join(final,sub), exist_ok=True)
+            except Exception: pass
 
 def sanitize(name):
     for k,v in {'"':"'", ':':'-','/':'-','\\':'-','|':'-','?':'','*':'','<':'(','>':')'}.items():
@@ -121,8 +128,8 @@ def organize(source, final, mode):
         src = os.path.join(source,f)
         artist,title = read_meta(src)
         genre = beatport_lookup(artist, title, cache) or "Unknown"
-        folder = genre_to_folder(genre) if genre!="Unknown" else "Unknown"
-        dest_dir = os.path.join(final, folder); os.makedirs(dest_dir, exist_ok=True)
+        folder = "Unknown" if genre=="Unknown" else genre_to_folder(genre)
+        dest_dir = os.path.join(final, "Genres", folder); os.makedirs(dest_dir, exist_ok=True)
         newbase = sanitize(f"{artist} - {title}")+".mp3" if artist and title else f
         dest = os.path.join(dest_dir, newbase); st,ext = os.path.splitext(newbase); n=1
         while os.path.exists(dest):
@@ -218,7 +225,10 @@ def sync(cid, secret, final, playlist_name, limit):
     if not pid:
         st,js=sp_req(f"{API}/users/{uid}/playlists",method="POST",token=token,data={"name":playlist_name,"public":False,"description":"Musicas baixadas (sync)"})
         if st in (200,201) and "id" in js: pid=js["id"]; log(f"Playlist '{playlist_name}' criada.")
-        else: log(f"Nao consegui criar a playlist (HTTP {st}). Crie uma playlist chamada '{playlist_name}' no app do Spotify e tente de novo."); return
+        else:
+            log(f"A Spotify bloqueia criar playlist em apps pessoais (modo desenvolvimento) — HTTP {st}.")
+            log(f"Solução: crie no app do Spotify uma playlist com o nome EXATO '{playlist_name}' e rode de novo — o app vai preenchê-la.")
+            return
     else: log(f"Playlist '{playlist_name}' encontrada.")
     # 1) ler a playlist atual e salvar snapshot local (parser robusto p/ a API nova)
     have=set(); snap=[]; api_total=None; raw_items=0; first_raw=None
@@ -249,7 +259,9 @@ def sync(cid, secret, final, playlist_name, limit):
         save_json(os.path.join(HERE,"_debug_item.json"), first_raw)
         log("AVISO: a playlist tem itens mas não consegui ler as URIs. Salvei _debug_item.json — me envie esse arquivo.")
     # 2) comparar com a pasta final; candidatos = faixas que ainda NÃO estão na playlist
-    tracks=list_all_tracks(final); match=load_json(MATCH_CACHE,{})
+    lib=os.path.join(final,"Genres")
+    if not os.path.isdir(lib): log(f"Pasta 'Genres' não existe em {final}. Organize músicas primeiro."); return
+    tracks=list_all_tracks(lib); match=load_json(MATCH_CACHE,{})
     already=0; cached_nf=0; candidates=[]   # cada candidato: (artist,title,base,uri_ou_None)
     for (a,t,base) in tracks:
         if base in match:
@@ -282,9 +294,10 @@ def sync(cid, secret, final, playlist_name, limit):
     log(f"\nConcluído. Adicionadas agora: {len(to_add)}. Não encontradas nesta execução: {nf}.")
 
 def dedupe(final, apply):
-    if not os.path.isdir(final): log(f"Pasta final inválida: {final}"); return
-    files=[os.path.join(r,f) for r,_,fs in os.walk(final) for f in fs if f.lower().endswith(".mp3")]
-    if not files: log("Nenhum mp3 na pasta final."); return
+    base=os.path.join(final,"Genres")
+    if not os.path.isdir(base): log(f"Pasta 'Genres' não existe em {final}."); return
+    files=[os.path.join(r,f) for r,_,fs in os.walk(base) for f in fs if f.lower().endswith(".mp3")]
+    if not files: log("Nenhum mp3 em Genres."); return
     log(f"Analisando {len(files)} arquivo(s)...  (modo: {'REMOVER de fato' if apply else 'apenas prévia'})\n")
     STOP={"the","a","an","feat","ft","and","de","do","da"}
     def toks(p):
@@ -336,10 +349,10 @@ def dedupe(final, apply):
         grp=[x for x in grp if x not in seen]
         if len(grp)<2: continue
         keep=keep_of(grp); seen.update(grp); handled.update(grp)
-        log(f"[{label}] manter: {os.path.relpath(keep,final)}")
+        log(f"[{label}] manter: {os.path.relpath(keep,base)}")
         for p in grp:
             if p==keep: continue
-            log(f"    remover: {os.path.relpath(p,final)}")
+            log(f"    remover: {os.path.relpath(p,base)}")
             if apply:
                 try: os.remove(p); removed+=1
                 except Exception as e: log(f"      (falha: {e})")
@@ -356,10 +369,145 @@ def dedupe(final, apply):
     if review:
         log("Possíveis duplicatas para revisar à mão (NÃO removidas — podem ser versões diferentes):")
         for a,b,jac in review:
-            log(f"  ~{jac}  {os.path.relpath(a,final)}  [{durc[a]}s]")
-            log(f"          {os.path.relpath(b,final)}  [{durc[b]}s]")
+            log(f"  ~{jac}  {os.path.relpath(a,base)}  [{durc[a]}s]")
+            log(f"          {os.path.relpath(b,base)}  [{durc[b]}s]")
         log("")
     log(f"Concluído. {('Removidos: '+str(removed)) if apply else 'Prévia (nada foi removido).'}  Para revisar à mão: {len(review)} par(es).")
+
+def sp_find_playlist(token, uid, name):
+    url=f"{API}/me/playlists?limit=50"
+    while url:
+        st,js=sp_req(url,token=token)
+        if st!=200: return None
+        for pl in js.get("items",[]):
+            if pl and pl.get("name")==name and pl.get("owner",{}).get("id")==uid: return pl["id"]
+        url=js.get("next")
+    return None
+
+def sp_playlist_uris(token, pid, ordered=False):
+    have=set(); seq=[]; url=f"{API}/playlists/{pid}/items?limit=100&additional_types=track"
+    while url:
+        st,js=sp_req(url,token=token)
+        if st!=200: break
+        page=js.get("items") or (js.get("tracks",{}) or {}).get("items") or []
+        for it in page:
+            tr=None
+            if isinstance(it,dict):
+                for key in ("track","item","episode"):
+                    v=it.get(key)
+                    if isinstance(v,dict): tr=v; break
+                if tr is None and it.get("uri"): tr=it
+            if not isinstance(tr,dict): continue
+            u=tr.get("uri")
+            if u and "track" in u and u not in have:
+                have.add(u); seq.append(u)
+        url=js.get("next")
+    return (have,seq) if ordered else have
+
+def diff_download(cid, secret, source_url, dest_url, downloaded_name):
+    if not cid or not secret: log("Preencha Client ID e Client Secret."); return
+    ms=re.search(r"playlist[:/]([A-Za-z0-9]+)", source_url or "")
+    md=re.search(r"playlist[:/]([A-Za-z0-9]+)", dest_url or "")
+    if not ms: log("Link da playlist de ORIGEM inválido."); return
+    if not md: log("Link da playlist de DESTINO inválido."); return
+    src_id=ms.group(1); dest_id=md.group(1)
+    token=sp_token(cid,secret)
+    if not token: return
+    st,me=sp_req(f"{API}/me",token=token)
+    if st!=200: log(f"Erro /me: {me}"); return
+    uid=me["id"]
+    st,js=sp_req(f"{API}/playlists/{src_id}?fields=name",token=token)
+    if st!=200: log(f"Não consegui ler a ORIGEM (HTTP {st}): {js}"); return
+    src_name=js.get("name") or src_id
+    st,js=sp_req(f"{API}/playlists/{dest_id}?fields=name,owner(id)",token=token)
+    if st!=200: log(f"Não consegui ler o DESTINO (HTTP {st}): {js}"); return
+    dest_name=js.get("name") or dest_id
+    dest_owner=(js.get("owner") or {}).get("id")
+    if dest_owner and dest_owner!=uid:
+        log(f"Atenção: a playlist de destino '{dest_name}' não parece ser sua. O Spotify só deixa adicionar em playlists suas (ou colaborativas) — pode dar 403 ao adicionar.")
+    log(f"Origem: '{src_name}'  →  Destino: '{dest_name}'")
+    _,src_uris=sp_playlist_uris(token,src_id,ordered=True)
+    log(f"Origem tem {len(src_uris)} faixa(s).")
+    if not src_uris: log("Nada lido da origem — verifique se a playlist é pública."); return
+    pid_dl=sp_find_playlist(token,uid,downloaded_name)
+    have_dl=sp_playlist_uris(token,pid_dl) if pid_dl else set()
+    log(f"'{downloaded_name}' (já baixadas): {len(have_dl)} faixa(s)." if pid_dl else f"Playlist '{downloaded_name}' não encontrada — considerando 0 já baixadas.")
+    have_t=sp_playlist_uris(token,dest_id)
+    ja_bx=sum(1 for u in src_uris if u in have_dl)
+    ja_dest=sum(1 for u in src_uris if u in have_t)
+    to_add=[u for u in src_uris if u not in have_dl and u not in have_t]
+    log(f"Origem: {len(src_uris)} | já baixadas (ignoradas): {ja_bx} | já no destino: {ja_dest} | a adicionar: {len(to_add)}")
+    erro=False
+    for k in range(0,len(to_add),100):
+        st,js=sp_req(f"{API}/playlists/{dest_id}/items",method="POST",token=token,data={"uris":to_add[k:k+100]})
+        if st not in (200,201): erro=True; log(f"Erro ao adicionar no destino (HTTP {st}): {js}")
+    if erro and to_add:
+        log("Se deu 403: confirme que a playlist de DESTINO foi criada na SUA conta (você precisa ser o dono).")
+    log(f"\nConcluído. Adicionadas no destino '{dest_name}': {len(to_add)}.")
+
+SMALL_PT={"a","o","as","os","de","da","do","das","dos","e","em","no","na","nos","nas","que","com","para","pra","feat","ft","the","of","and","vs","x"}
+def _smart_title(s):
+    letters=[c for c in s if c.isalpha()]
+    if not letters or any(c.islower() for c in letters): return s   # só recapitaliza se estiver TODO MAIÚSCULO
+    out=[]; ws=s.split()
+    for i,w in enumerate(ws):
+        lw=w.lower()
+        out.append(lw if (i!=0 and lw in SMALL_PT) else (lw[:1].upper()+lw[1:]))
+    return " ".join(out)
+def _title_paren(t):
+    if " - " in t:
+        base,ver=t.split(" - ",1); base=base.rstrip()
+        return (f"{base} [{ver.strip()}]" if base.endswith(")") else f"{base} ({ver.strip()})")
+    return t
+def _clean_junk(s):
+    s=re.sub(r"(?i)\b(spotdown(\.org)?|spotifydown(\.com)?|spotidownloader|y2mate|tubidy|musicpleer|savefrom|ytmp3|320 ?kbps|128 ?kbps|official\s+(music\s+)?(video|audio|lyric\s+video?)|video\s+oficial|audio\s+oficial|lyrics?)\b[.\w]*","",s)
+    s=s.replace("_"," ")
+    s=re.sub(r"\s+"," ",s).strip(" -_.")
+    return s
+
+def fix_names(final):
+    if not final or not os.path.isdir(final): log(f"Pasta inválida: {final}"); return
+    folder=os.path.join(final,"Downloaded Musics"); os.makedirs(folder,exist_ok=True)
+    files=[f for f in os.listdir(folder) if f.lower().endswith(".mp3") and os.path.isfile(os.path.join(folder,f))]
+    if not files:
+        log(f"Pasta pronta: {folder}\nColoque os mp3s a corrigir nela e rode de novo."); return
+    log(f"Corrigindo {len(files)} arquivo(s) em 'Downloaded Musics'...\n")
+    done=0
+    for i,f in enumerate(sorted(files),1):
+        src=os.path.join(folder,f)
+        artist=title=""
+        if HAVE_MUTAGEN:
+            try:
+                t=EasyID3(src); artist=(t.get("artist") or [""])[0]; title=(t.get("title") or [""])[0]
+            except Exception: pass
+        base=_clean_junk(os.path.splitext(f)[0])
+        if not title:
+            if " - " in base: a,b=base.split(" - ",1); artist=artist or a.strip(); title=b.strip()
+            else: title=base
+        title=_title_paren(_smart_title(_clean_junk(title)))
+        artist=_clean_junk(artist)
+        if artist: artist=", ".join(x.strip() for x in re.split(r"[/;]",artist) if x.strip())
+        if artist and title: newbase=sanitize(f"{artist} - {title}")+".mp3"
+        elif title: newbase=sanitize(title)+".mp3"
+        else: newbase=f
+        if HAVE_MUTAGEN and (artist or title):
+            try:
+                try: tt=EasyID3(src)
+                except ID3NoHeaderError:
+                    m=MP3(src); m.add_tags(); m.save(); tt=EasyID3(src)
+                if title: tt["title"]=title
+                if artist: tt["artist"]=artist
+                tt.save()
+            except Exception: pass
+        dest=os.path.join(folder,newbase)
+        if os.path.abspath(dest)!=os.path.abspath(src):
+            st0,ext=os.path.splitext(newbase); n=1
+            while os.path.exists(dest): n+=1; dest=os.path.join(folder,f"{st0} ({n}){ext}")
+            try: os.replace(src,dest)
+            except Exception as e: log(f"[{i}/{len(files)}] ERRO em {f}: {e}"); continue
+        done+=1
+        log(f"[{i}/{len(files)}] {f}  ->  {os.path.basename(dest)}")
+    log(f"\nConcluído. Corrigidos: {done}. Pasta: {folder}")
 
 def run_job(fn,*a):
     def wrap():
@@ -398,16 +546,18 @@ class Handler(BaseHTTPRequestHandler):
         body=json.loads(self.rfile.read(ln) or "{}") if ln else {}
         if u.path=="/api/config":
             cfg=get_config(); cfg.update({k:body.get(k,cfg[k]) for k in DEFAULTS})
-            save_json(CONFIG_FILE,cfg); return self._send(200,"application/json",json.dumps({"ok":True}))
+            save_json(CONFIG_FILE,cfg); ensure_library(cfg.get("final_dir","")); return self._send(200,"application/json",json.dumps({"ok":True}))
         if u.path=="/api/pick-folder":
             return self._send(200,"application/json",json.dumps({"path":pick_folder()}))
-        if u.path in ("/api/organize","/api/sync","/api/dedupe"):
+        if u.path in ("/api/organize","/api/sync","/api/dedupe","/api/diff","/api/fixnames"):
             with LOCK:
                 if STATE["running"]: return self._send(200,"application/json",json.dumps({"ok":False,"msg":"já rodando"}))
                 STATE["logs"]=[]
             c=get_config()
             if u.path=="/api/organize": run_job(organize,c["source_dir"],c["final_dir"],c["op_mode"])
             elif u.path=="/api/dedupe": run_job(dedupe,c["final_dir"],bool(c["dedupe_apply"]))
+            elif u.path=="/api/diff": run_job(diff_download,c["client_id"],c["client_secret"],c["source_playlist_url"],c["dest_playlist_url"],c["playlist_name"])
+            elif u.path=="/api/fixnames": run_job(fix_names,c["final_dir"])
             else: run_job(sync,c["client_id"],c["client_secret"],c["final_dir"],c["playlist_name"],c["sync_limit"])
             return self._send(200,"application/json",json.dumps({"ok":True}))
         return self._send(404,"text/plain","not found")
@@ -415,6 +565,7 @@ def main():
     srv=ThreadingHTTPServer(("127.0.0.1",APP_PORT),Handler); url=f"http://127.0.0.1:{APP_PORT}"
     print(f"Music Sync rodando em {url}  (Ctrl+C para sair)")
     print("mutagen:", "OK" if HAVE_MUTAGEN else "ausente (rode: pip install --user mutagen)")
+    ensure_library(get_config().get("final_dir",""))
     try: webbrowser.open(url)
     except Exception: pass
     try: srv.serve_forever()

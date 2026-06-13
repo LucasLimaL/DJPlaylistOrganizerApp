@@ -3,25 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Music Sync</title>
+<title>DJ Playlist Organizer</title>
 <style>
-  :root{ --bg:#0f1115; --card:#171a21; --bd:#262b36; --tx:#e7eaf0; --mut:#9aa3b2; --ac:#1db954; --ac2:#3b82f6; }
+  :root{ --bg:#0f1115; --card:#171a21; --bd:#262b36; --tx:#e7eaf0; --mut:#9aa3b2; --ac:#1db954; --ac2:#3b82f6; --org:#3b82f6; }
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--tx)}
-  .wrap{max-width:860px;margin:0 auto;padding:28px 18px 60px}
+  .wrap{max-width:880px;margin:0 auto;padding:28px 18px 60px}
   h1{font-size:22px;margin:0 0 4px} .sub{color:var(--mut);margin:0 0 22px;font-size:13px}
   .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px;margin-bottom:16px}
-  h2{font-size:14px;margin:0 0 4px;color:#cdd3df} label{display:block;font-size:13px;color:var(--mut);margin:12px 0 6px}
+  .card.fn{border-left:3px solid var(--bd)}
+  .card.org{border-left-color:var(--org)} .card.spot{border-left-color:var(--ac)}
+  h2{font-size:15px;margin:0 0 8px;color:#eef1f6}
+  .desc{font-size:12.5px;color:#b7c0cf;background:#0c0e13;border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin:0 0 14px;line-height:1.5}
+  label{display:block;font-size:13px;color:var(--mut);margin:12px 0 6px}
   input[type=text],input[type=password]{width:100%;padding:10px 12px;background:#0c0e13;border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:14px}
   .row{display:flex;gap:8px} .row input{flex:1}
   button{cursor:pointer;border:0;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;color:#fff}
-  .btn-ghost{background:#222733} .btn-save{background:#2b3140} .btn-org{background:var(--ac2)} .btn-sync{background:var(--ac)}
+  .btn-ghost{background:#222733} .btn-org{background:var(--org)} .btn-sync{background:var(--ac)} .btn-dup{background:#6b7280}
   button:disabled{opacity:.5;cursor:not-allowed}
   .actions{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
   .hint{font-size:12px;color:var(--mut);margin-top:6px}
   .modes{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
-  .mode{flex:1;min-width:240px;border:1px solid var(--bd);border-radius:10px;padding:12px;cursor:pointer;background:#0c0e13}
-  .mode.sel{border-color:var(--ac2);box-shadow:0 0 0 1px var(--ac2) inset}
+  .mode{flex:1;min-width:230px;border:1px solid var(--bd);border-radius:10px;padding:12px;cursor:pointer;background:#0c0e13}
+  .mode.sel{border-color:var(--org);box-shadow:0 0 0 1px var(--org) inset}
   .mode b{display:block;margin-bottom:4px} .mode span{font-size:12px;color:var(--mut)}
   pre{background:#0a0c10;border:1px solid var(--bd);border-radius:10px;padding:14px;height:300px;overflow:auto;
       font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre-wrap;margin:0}
@@ -29,69 +33,97 @@
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3a3f4b;margin-right:6px}
   .dot.on{background:var(--ac);animation:p 1s infinite} @keyframes p{50%{opacity:.4}}
   a{color:var(--ac2)} code{background:#0c0e13;padding:1px 5px;border-radius:4px}
+  .chk{display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px} .chk input{width:auto}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>🎧 Music Sync</h1>
-  <p class="sub">Organiza seus mp3s por gênero do Beatport e sincroniza com uma playlist do Spotify.</p>
+  <h1>🎧 DJ Playlist Organizer</h1>
+  <p class="sub">Organize seus mp3s por gênero do Beatport e mantenha uma playlist do Spotify com tudo que você já baixou.<br>Fluxo sugerido: <b>Corrigir nomes</b> → <b>Organizar por Beatport</b> → <b>Remover duplicatas</b> → <b>Sincronizar com Spotify</b>.</p>
 
+  <!-- BLOCO COMPARTILHADO -->
   <div class="card">
-    <h2>📁 Pastas</h2>
-    <label>Pasta inicial — músicas a organizar (entrada)</label>
-    <div class="row"><input type="text" id="source_dir" placeholder="ex.: D:\HD\Músicas\A organizar"><button class="btn-ghost" onclick="pick('source_dir')">Escolher…</button></div>
-    <p class="hint">Onde você joga as músicas novas, ainda soltas/desorganizadas.</p>
-
-    <label>Pasta final — coleção por gênero do Beatport (destino)</label>
-    <div class="row"><input type="text" id="final_dir" placeholder="ex.: D:\HD\Músicas\DJ - Final"><button class="btn-ghost" onclick="pick('final_dir')">Escolher…</button></div>
-    <p class="hint">Onde ficam as subpastas por gênero. A sincronização com o Spotify lê <b>esta</b> pasta.</p>
+    <h2>📁 Biblioteca organizada</h2>
+    <p class="desc">Pasta-raiz da sua coleção. O app cria/usa automaticamente duas pastas aqui dentro: <code>Genres/</code> (as subpastas por gênero, incluindo <code>Genres/Unknown/</code>) e <code>Downloaded Musics/</code> (temporária, para corrigir nomes). <b>Todas as funções abaixo trabalham a partir desta pasta.</b></p>
+    <div class="row"><input type="text" id="final_dir" placeholder="ex.: D:\HD\Músicas\DJ - Final" onchange="saveCfg()"><button class="btn-ghost" onclick="pick('final_dir')">Escolher…</button></div>
   </div>
 
-  <div class="card">
-    <h2>🔀 Ao organizar, o app deve…</h2>
+  <!-- FUNÇÃO 1: ORGANIZAR -->
+  <div class="card fn org">
+    <h2>🎚️ Organizar por Beatport</h2>
+    <p class="desc">Pega os mp3s que estão na <b>pasta inicial</b> (músicas novas, ainda soltas), descobre o gênero de cada uma no Beatport e as coloca dentro da biblioteca em <code>Genres/&lt;Gênero&gt;/</code> (ex.: <code>Genres/Tech House/</code>). Também renomeia para <code>Artista - Título</code> e grava o gênero na tag. Sem gênero encontrado → vai para <code>Genres/Unknown/</code>.</p>
+
+    <label>Pasta inicial — músicas a organizar (entrada)</label>
+    <div class="row"><input type="text" id="source_dir" placeholder="ex.: D:\HD\Músicas\A organizar" onchange="saveCfg()"><button class="btn-ghost" onclick="pick('source_dir')">Escolher…</button></div>
+
+    <label>Ao organizar, o app deve:</label>
     <div class="modes">
       <div class="mode" id="mode-move" onclick="setMode('move')">
-        <b>Mover</b>
-        <span>Tira o arquivo da pasta inicial e coloca na final. A pasta inicial fica <b>vazia</b> ao terminar. Não ocupa espaço extra. Ideal quando a pasta inicial é só uma “caixa de entrada” temporária.</span>
+        <b>Mover</b><span>Tira o arquivo da pasta inicial e leva para a biblioteca. A pasta inicial fica <b>vazia</b> no fim. Não ocupa espaço extra.</span>
       </div>
       <div class="mode" id="mode-copy" onclick="setMode('copy')">
-        <b>Copiar</b>
-        <span>Mantém o original na pasta inicial e cria uma <b>cópia</b> na final. Ocupa o <b>dobro</b> de espaço, mas preserva os arquivos de origem intactos. Ideal se a pasta inicial é, por ex., sua pasta de Downloads que você não quer esvaziar.</span>
+        <b>Copiar</b><span>Mantém o original na pasta inicial e cria uma <b>cópia</b> na biblioteca. Ocupa o <b>dobro</b> de espaço, mas preserva a origem.</span>
       </div>
     </div>
+    <div class="actions"><button class="btn-org" id="bOrg" onclick="run('organize')">Organizar por Beatport</button></div>
   </div>
 
-  <div class="card">
-    <h2>🧹 Remover duplicatas (na pasta final)</h2>
-    <p class="hint">Procura faixas repetidas em todas as subpastas. Remove automaticamente só o que é <b>certeza</b> (mesmo áudio, ou mesmo nome + mesma duração) e <b>lista para você revisar</b> os casos parecidos (que podem ser remixes/versões diferentes).</p>
-    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px">
-      <input type="checkbox" id="dedupe_apply" style="width:auto"> Remover de fato (sem marcar, faz só a prévia)
-    </label>
-    <div class="actions">
-      <button class="btn-org" id="bDup" onclick="run('dedupe')">Procurar duplicatas</button>
+  <!-- FUNÇÃO 1b: DUPLICATAS -->
+  <div class="card fn org">
+    <h2>🧹 Remover duplicatas</h2>
+    <p class="desc">Procura faixas repetidas dentro de <code>Genres/</code> (toda a sua coleção). Remove automaticamente só o que é <b>certeza</b> (mesmo áudio, ou mesmo nome + mesma duração) e <b>lista</b> as parecidas (possíveis versões/remixes diferentes) para você decidir. Faz parte da organização da sua coleção.</p>
+    <label>O que fazer ao encontrar duplicatas:</label>
+    <div class="modes">
+      <div class="mode" id="dd-prev" onclick="setDedup(false)">
+        <b>Só pré-visualizar</b><span>Apenas <b>mostra na tela</b> quais faixas estão duplicadas. <b>Nada é apagado.</b> Use para conferir antes.</span>
+      </div>
+      <div class="mode" id="dd-del" onclick="setDedup(true)">
+        <b>Apagar duplicatas</b><span>Mostra e <b>apaga de verdade</b> as duplicatas certas (mantém 1 cópia de cada). As parecidas/ambíguas seguem só listadas, nunca apagadas.</span>
+      </div>
     </div>
+    <div class="actions"><button class="btn-dup" id="bDup" onclick="run('dedupe')">Procurar duplicatas</button></div>
   </div>
 
-  <div class="card">
-    <h2>🎵 Spotify</h2>
-    <label>Client ID</label>
-    <input type="text" id="client_id" placeholder="seu client id">
-    <label>Client Secret</label>
-    <input type="password" id="client_secret" placeholder="seu client secret">
-    <p class="hint">App grátis em <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com</a>; Redirect URI <code>http://127.0.0.1:8888/callback</code>.</p>
+  <!-- FUNÇÃO 1c: CORRIGIR NOMES -->
+  <div class="card fn org">
+    <h2>🔤 Corrigir nomes (pasta "Downloaded Musics")</h2>
+    <p class="desc">Usa/cria a pasta <code>Downloaded Musics</code> no topo da <b>Biblioteca organizada</b> (temporária, fora de <code>Genres/</code> — por isso não entra no sync). Coloque ali mp3s baixados com nome bagunçado (ex.: <code>Puta Que Pariu_spotdown.org.mp3</code>). O app lê as tags (artista/título), <b>limpa o lixo</b> do nome (sites como spotdown.org, <code>_</code>, "Official Audio", etc.) e renomeia para <code>Artista - Título.mp3</code>, corrigindo também as tags. Depois é só organizar à mão ou rodar "Organizar por Beatport" usando essa pasta como <b>pasta inicial</b>.</p>
+    <div class="actions"><button class="btn-org" id="bFix" onclick="run('fixnames')">Corrigir nomes em Downloaded Musics</button></div>
+  </div>
+
+  <!-- FUNÇÃO 2: SPOTIFY -->
+  <div class="card fn spot">
+    <h2>🎵 Sincronizar com Spotify</h2>
+    <p class="desc">Lê todas as faixas dentro de <code>Genres/</code> (a <code>Downloaded Musics</code> fica de fora) e adiciona à sua playlist do Spotify <b>apenas</b> as faixas que ainda não estão nela (sem duplicar). Usa um cache local para <b>não gastar chamadas de API</b> com o que já é conhecido. Na 1ª vez, abre o navegador para você autorizar.</p>
+
+    <label>Spotify Client ID</label>
+    <input type="text" id="client_id" placeholder="seu client id" onchange="saveCfg()">
+    <label>Spotify Client Secret</label>
+    <input type="password" id="client_secret" placeholder="seu client secret" onchange="saveCfg()">
+    <p class="hint">App grátis em <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com</a>; Redirect URI <code>http://127.0.0.1:8888/callback</code>; adicione sua conta no <b>User Management</b> do app.</p>
+
     <label>Nome da playlist</label>
-    <input type="text" id="playlist_name" value="Download Sync">
-    <label>Limite de músicas novas por sincronização (0 = sem limite)</label>
-    <input type="text" id="sync_limit" value="0" inputmode="numeric" placeholder="ex.: 5 para testar">
-    <p class="hint">Só conta as faixas <b>novas</b> (que precisam ser buscadas no Spotify). As que já estão na playlist ou já têm correspondência salva <b>não gastam API</b>.</p>
+    <input type="text" id="playlist_name" value="Download Sync" onchange="saveCfg()">
 
-    <div class="actions">
-      <button class="btn-save" onclick="saveCfg()">Salvar configurações</button>
-      <button class="btn-org"  id="bOrg"  onclick="run('organize')">Organizar por Beatport</button>
-      <button class="btn-sync" id="bSync" onclick="run('sync')">Sincronizar com Spotify</button>
-    </div>
+    <label>Limite de músicas novas por sincronização (0 = sem limite)</label>
+    <input type="text" id="sync_limit" value="0" inputmode="numeric" placeholder="ex.: 5 para testar" onchange="saveCfg()">
+    <p class="hint">Conta só as faixas <b>novas</b> (que faltam na playlist). As que já estão lá ou já têm correspondência salva <b>não gastam API</b>.</p>
+
+    <div class="actions"><button class="btn-sync" id="bSync" onclick="run('sync')">Sincronizar com Spotify</button></div>
   </div>
 
+  <!-- FUNÇÃO 3: A BAIXAR -->
+  <div class="card fn spot">
+    <h2>📥 Separar o que falta baixar</h2>
+    <p class="desc">Você informa duas playlists pelo link: a de <b>origem</b> (qualquer playlist pública) e a de <b>destino</b> (uma playlist <b>sua</b>, que você cria antes no Spotify). O app adiciona ao <b>destino</b> as faixas da origem que <b>ainda não estão</b> na sua <b>"<span id="dlname">Download Sync</span>"</b> — ou seja, o que você ainda não baixou. Como o destino vem por link, <b>não precisa criar playlist via API</b> (que a Spotify bloqueia em apps pessoais). Não duplica e gasta pouca API.</p>
+    <label>Link da playlist de ORIGEM (pública)</label>
+    <input type="text" id="source_playlist_url" placeholder="https://open.spotify.com/playlist/..." onchange="saveCfg()">
+    <label>Link da playlist de DESTINO (sua — crie antes no Spotify)</label>
+    <input type="text" id="dest_playlist_url" placeholder="https://open.spotify.com/playlist/..." onchange="saveCfg()">
+    <div class="actions"><button class="btn-sync" id="bDiff" onclick="run('diff')">Adicionar o que falta no destino</button></div>
+  </div>
+
+  <!-- LOG -->
   <div class="card">
     <p class="status"><span class="dot" id="dot"></span><span id="st">ocioso</span></p>
     <pre id="log"></pre>
@@ -100,11 +132,12 @@
 
 <script>
 const $=id=>document.getElementById(id);
-const TEXT=["client_id","client_secret","source_dir","final_dir","playlist_name","sync_limit"];
-let mode="move";
+const TEXT=["client_id","client_secret","source_dir","final_dir","playlist_name","sync_limit","source_playlist_url","dest_playlist_url"];
+let mode="move"; let dedup=false;
 function setMode(m){ mode=m; $("mode-move").classList.toggle("sel",m==="move"); $("mode-copy").classList.toggle("sel",m==="copy"); saveCfg(); }
-async function loadCfg(){ const c=await (await fetch("/api/config")).json(); TEXT.forEach(f=>{ if(c[f]!==undefined)$(f).value=c[f]; }); setMode(c.op_mode||"move"); $("dedupe_apply").checked=!!c.dedupe_apply; }
-function cfgBody(){ const o={op_mode:mode, dedupe_apply:$("dedupe_apply").checked}; TEXT.forEach(f=>o[f]=$(f).value); return o; }
+function setDedup(v){ dedup=v; $("dd-prev").classList.toggle("sel",!v); $("dd-del").classList.toggle("sel",v); saveCfg(); }
+async function loadCfg(){ const c=await (await fetch("/api/config")).json(); TEXT.forEach(f=>{ if(c[f]!==undefined)$(f).value=c[f]; }); setMode(c.op_mode||"move"); setDedup(!!c.dedupe_apply); var dn=document.getElementById("dlname"); if(dn) dn.textContent=c.playlist_name||"Download Sync"; }
+function cfgBody(){ const o={op_mode:mode, dedupe_apply:dedup}; TEXT.forEach(f=>o[f]=$(f).value); return o; }
 async function saveCfg(){ await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(cfgBody())}); }
 function flash(m){ $("st").textContent=m; }
 async function pick(target){ const r=await (await fetch("/api/pick-folder",{method:"POST"})).json(); if(r.path){ $(target).value=r.path; saveCfg(); } }
@@ -115,7 +148,7 @@ async function run(kind){
   if(!r.ok){ flash(r.msg||"não foi possível iniciar"); return; }
   $("log").textContent=""; since=0; setRunning(true); poll();
 }
-function setRunning(on){ $("dot").classList.toggle("on",on); $("bOrg").disabled=on; $("bSync").disabled=on; $("bDup").disabled=on; $("st").textContent=on?"rodando…":"ocioso"; }
+function setRunning(on){ $("dot").classList.toggle("on",on); $("bOrg").disabled=on; $("bSync").disabled=on; $("bDup").disabled=on; $("bDiff").disabled=on; $("bFix").disabled=on; $("st").textContent=on?"rodando…":"ocioso"; }
 async function poll(){
   if(polling) return; polling=true;
   const r=await (await fetch("/api/logs?since="+since)).json();
